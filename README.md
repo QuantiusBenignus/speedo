@@ -1,4 +1,4 @@
-# Speak Right Into Your todo.txt with `speedo`
+# Speak right into your todo.txt with `speedo`
 ---
 ## Record yout todo.txt tasks, set due dates, priority and tags directly from speech.
 ![speedo.png](speedo.png)
