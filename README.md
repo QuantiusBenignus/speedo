@@ -24,15 +24,14 @@ will result in the following lines in todo.txt (or its equivalent):
 ```
 .
 .
-() 2023-02-21  I have to see my dentist next week. Reminder for Tuesday.   +health @ME due:2023-02-22
-(A) 2023-02-21  Return customer call ASAP, reminder tonight at 8.   +work @ME due:2023-02-21T20:00
+() 2023-02-21  I have to see my dentist next week. Reminder for Tuesday. +health @ME due:2023-02-22
+(A) 2023-02-21  Return customer call ASAP, reminder tonight at 8. +work @ME due:2023-02-21T20:00
 
 ```
 
 For more info, invoking  `speedo  --help` will output:
 
 ```
-
              .~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~.
              |  speedo - Create a todotxt task and set tags, context, priority   |
              |    via speech. The Linux CLI power at the tip of your tongue!     |
@@ -56,28 +55,29 @@ For more info, invoking  `speedo  --help` will output:
     If explicit datetime not supplied, transcribed text is parsed for a valid datetime for the due date.  
     It is quite difficult for computers to parse our spoken time references and using only built-in tools
     (i.e. date -d from coreutils) presents a huge challenge when parsing arbitrary datetime text. 
-    A keyword set to the last "$keywrd" in the transcribed text is used to isolate the time reference:
+    A keyword set to the last "reminder" in the transcribed text is used to isolate the time reference:
     
-    Spoken format: "<FREE FORM SPEECH> [$keywrd <TIME REFERENCE>] [$hashkey|$priorkey <TAGS|PWORD>] 
+    Spoken format: "<FREE FORM SPEECH> [reminder <TIME REFERENCE>] [hashtag|priority <TAGS|PWORD>] 
     
     EXAMPLES:
-      "Need to see my dentist next week. Set $keywrd for Tuesday. $hashkey health."       - this is valid.
-      "Scheduled a company meeting with $keywrd for 2023-5-24 at 8 am. $priorkey high. $hashkey work." - OK.
-      "Withdraw old $keywrd and set new $keywrd for March the 3rd in the evening, $priorkey top."  -OK.
-             ( "... $keywrd for next week"
-      Also   | "... $keywrd in 3 hours, $priorkey alpha"
-      valid: { "... $keywrd tomorrow morning"  (see source code for "morning" & other adjustable definitions)
-             | "... $keywrd in 33 hours and 5 minutes"
-             ( "... $keywrd on Thanksgiving day in 15 years, $hashkey family"
-      Custom:  "... $keywrd at the usual time. $hashkey fun." allows customization (see code for ideas)
+      "Need to see my dentist next week. Set reminder for Tuesday. hashtag health."       - this is valid.
+      "Scheduled a company meeting with reminder for 2023-5-24 at 8 am. priority high. hashtag work." - OK.
+      "Withdraw old reminder and set new reminder for March the 3rd in the evening, priority top."  -OK.
+             ( "... reminder for next week"
+      Also   | "... reminder in 3 hours, priority alpha"
+      valid: { "... reminder tomorrow morning"  (see source code for "morning" & other adjustable definitions)
+             | "... reminder in 33 hours and 5 minutes"
+             ( "... reminder on Thanksgiving day in 15 years, hashtag family"
+      Custom:  "... reminder at the usual time. hashtag fun." allows customization (see code for ideas)
     Speaking literaly "YYYY-MM-DD", followed by time (if needed) e.g. "2024 dash 5 dash 23 at 1pm" works well.
     In some edge cases, successful parsing gives incorrect datetime. Some practice needed to avoid those.
     For scheduling critically-important stuff with this utility, use the command-line option "-d" 
     and provide explicit datetimespec or instead, simply set the to-do date in the text file.
 
-    NOTE:   Only the text BEFORE the 1st "$hashkey" (or "$priorkey") in the transcribed text will be displayed,
+    NOTE:   Only the text BEFORE the 1st "hashtag" (or "priority") in the transcribed text will be displayed,
     including the time reference. The rest is cut and parsed for tags and/or priority and MUST be of the form:
-    "...$hashkey TAG1,...$priorkey PWORD,...$hashkey TAGn", in no particular order with only [,.?] allowed.
+    "...hashtag TAG1,...priority PWORD,...hashtag TAGn", in no particular order with only [,.?] allowed.  
+
 ```
 	
 #### PREPARING THE ENVIRONMENT
