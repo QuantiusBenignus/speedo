@@ -13,5 +13,5 @@ Name=To-Do To Clipboard
 Exec=gnome-terminal --window-with-profile=YOURPROFILENAME --hide-menubar --geometry=64x6+380+920 --title=NewClip -- speedo -cw TODO
 
 [Desktop Action new-todo]
-Name=New Joplin ToDo
+Name=New ToDo
 Exec=gnome-terminal --window-with-profile=YOURPROFILENAME --hide-menubar --geometry=64x6+380+920 --title=NewTodo -- speedo -w TODO
