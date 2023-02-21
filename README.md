@@ -1,7 +1,7 @@
 # Speak Right Into Your todo.txt with `speedo`
 ---
 ## Record yout todo.txt tasks, set due dates, priority and tags directly from speech.
-${toc}
+
 This zsh command line utility for Linux records a voice memo from the microphone or uses audio file(s) as the input and then ranscribes each input (using whisper.cpp, a C/C++ port of OpenAI's Whisper engine) into text, formated as to-do task in todo.txt or Confluence style (among others). 
 
 The due date, context and priority fields in the todo.txt task can optionally be set with command line flags: 
@@ -34,7 +34,7 @@ For more info, invoking  `speedo  --help` will output:
 ```
 
              .~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~.
-             |  speedo - Create a todotxt task and set tags, context, priority  |
+             |  speedo - Create a todotxt task and set tags, context, priority   |
              |    via speech. The Linux CLI power at the tip of your tongue!     |
              *~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*
     Records a voice memo from the microphone or uses audio file(s) as the input. 
