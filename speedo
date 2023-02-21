@@ -1,0 +1,386 @@
+#!/usr/bin/zsh
+# Needs some changes for users of bash. 
+
+# MIT License
+
+# Copyright (c) 2023 Quantius Benignus
+
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+#--------------------------------------------------------------------------
+
+# NAME: speedo (SPEEch-to-DO) 
+
+# PREREQUSITES: 
+#      - zsh command line shell installation   
+#      - whisper.cpp installation (see https://github.com/ggerganov/whisper.cpp) 
+#      - recent versions of 'sox', 'xsel'  command-line tools from your system's repositories.
+#--------------------------------------------------------------------------
+
+#Check dependencies
+command -v sox &>/dev/null || { echo "sox is required. Please, install sox" >&2 ; exit 1 ; }
+command -v xsel &>/dev/null || { echo "xsel is required. Please, install xsel" >&2 ; exit 1 ; }
+command -v transcribe &>/dev/null || { echo -e "Please, install whisper.cpp (see https://github.com/ggerganov/whisper.cpp)\
+\nand create 'transcribe' in your PATH as a symbolic link to the main executable, e.g.\n \
+ 'ln -s /full/path/to/whisper.cpp/main \$HOME/bin/transcribe'" >&2 ; exit 1 ; }
+#Hear the complaints of the above tools:
+set -e
+
+#USER CONFIGURATION BLOCK. 
+#--------------------------------------------------------------------------
+#Please, adjust the variables here to suit your environment.
+#Store temp files in memory for speed and to reduce SSD/HDD "grinding":
+TEMPD='/dev/shm'
+#Default whisper.cpp model file for inference:
+model="$TEMPD/ggml-tiny.en.bin"
+#If Joplin is not running, store transcribed notes in Joplin config. directory for later processing. 
+TODOFILE=$HOME'/.config/todotxt/todo.txt'  #of course you can choose another place.
+#[ -v $ramf ] || ramf="$(mktemp -p /dev/shm/ vmXXXX)"
+#Hardcoded temp wav file to store the voice memo and get overwritten every time (in RAM):
+ramf="$TEMPD/vmwav"
+#Set the number of processing threads for whisper.cpp inference (adjust for your case):
+NTHR=4
+#It seems that the optimum number of transcribe threads should equal CPU processing cores:
+#NTHR="$(( $(lscpu | awk '/^Socket\(s\)/{ print $2 }') * $(lscpu | awk '/^Core\(s\) per socket/{ print $4 }') ))"
+
+#First, the SPOKEN trigger word to isolate the datetime block in the text for the to-do alarm.
+keywrd="reminder"   # pick a word that is pronounced clearly and is not too common. See td -h for use.
+# e.g. memento, alert, reminder, signal, notification, warning, notice, trigger 
+#The next few are for the inline to-do formats. Styles for Confluence and todo.txt are supported.
+#Extract tags directly from transcribed text, each tag preceded with this SPOKEN keyword:
+hashkey="hashtag"
+#SPOKEN keyword for setting priority level which follows this:
+priorkey="priority"   # e.g. priority, importance, urgency, significance
+#Assigned to whom (Confluence), or context (todo.txt) can be explicitly set with CLI flag `-w | --who`:
+assignee="TODO" #(default)
+#Array to hold the tags found in the transcribed text, can pre-populate with default e.g. "+itodo". 
+tags=("")
+#END OF USER CONFIGURATION BLOCK
+#--------------------------------------------------------------------------
+
+# Clipboard flag, when set the output goes to the clipboard (for insertion as inline to-do):
+unset clip
+#Choose the default inline-to-do format (can be implemented as CLI flag if styles used interchangeably)   
+unset style #"todotxt"  
+#stle="confluence"
+#Priority level:
+unset plevel
+#To use use extended_glob and then reset to user case:
+[[ $options[extended_glob] == off ]] && eglob=1
+
+show_help() {   
+cat << EOF
+
+             .~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~.
+             |  speedo - Create a todotxt task and set tags, context, priority  |
+             |    via speech. The Linux CLI power at the tip of your tongue!     |
+             *~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*
+    Records a voice memo from the microphone or uses audio file(s) as the input. 
+    Transcribes each input (using whisper.cpp, a C/C++ port of OpenAI's Whisper engine) into text,
+    formated as to-do task in a todo.txt (or Confluence) style among others. 
+      
+    SYNOPSIS: speedo [-b|-c|-s|-bc|-cb|-h|-d datetimespec|-w assignee|-p plevel] ... [filename(s)]
+      - 'speedo' use the default "tiny" whisper.cpp ASR model file and create a to-do note  
+      - 'speedo -h|--help' will print this text
+      - 'speedo -b|--base' transcribes a to-do using the larger (more accurate but slower) "base" model
+      - 'speedo -c|--clip' transcribe and send the text to the clipboard, formated as inline to-do 
+      - 'speedo -s|--style' switches from todo.txt format (default) to the one used in Confluence to dos.  
+      - 'speedo -d|--due datetimespec' create a to-do task with due date set by "datetimespec"
+      - 'speedo -p|--priority PWORD' assign a single word priority to this task, 5 levels suggested.
+      - 'speedo -w|--who assignee' add @assignee (or @context for todo.txt format) field to the inline to-do.
+      - 'speedo -[cb]a datetimespec' valid compound options OK, e.g. //datetimespec field in inline to-dos. 
+      - any and all non-option arguments are treated as input audio files to be converted
+
+    If explicit datetime not supplied, transcribed text is parsed for a valid datetime for the due date.  
+    It is quite difficult for computers to parse our spoken time references and using only built-in tools
+    (i.e. date -d from coreutils) presents a huge challenge when parsing arbitrary datetime text. 
+    A keyword set to the last "$keywrd" in the transcribed text is used to isolate the time reference:
+    
+    Spoken format: "<FREE FORM SPEECH> [$keywrd <TIME REFERENCE>] [$hashkey|$priorkey <TAGS|PWORD>] 
+    
+    EXAMPLES:
+      "Need to see my dentist next week. Set $keywrd for Tuesday. $hashkey health."       - this is valid.
+      "Scheduled a company meeting with $keywrd for 2023-5-24 at 8 am. $priorkey high. $hashkey work." - OK.
+      "Withdraw old $keywrd and set new $keywrd for March the 3rd in the evening, $priorkey top."  -OK.
+             ( "... $keywrd for next week"
+      Also   | "... $keywrd in 3 hours, $priorkey alpha"
+      valid: { "... $keywrd tomorrow morning"  (see source code for "morning" & other adjustable definitions)
+             | "... $keywrd in 33 hours and 5 minutes"
+             ( "... $keywrd on Thanksgiving day in 15 years, $hashkey family"
+      Custom:  "... $keywrd at the usual time. $hashkey fun." allows customization (see code for ideas)
+    Speaking literaly "YYYY-MM-DD", followed by time (if needed) e.g. "2024 dash 5 dash 23 at 1pm" works well.
+    In some edge cases, successful parsing gives incorrect datetime. Some practice needed to avoid those.
+    For scheduling critically-important stuff with this utility, use the command-line option "-d" 
+    and provide explicit datetimespec or instead, simply set the to-do date in the text file.
+
+    NOTE:   Only the text BEFORE the 1st "$hashkey" (or "$priorkey") in the transcribed text will be displayed,
+    including the time reference. The rest is cut and parsed for tags and/or priority and MUST be of the form:
+    "...$hashkey TAG1,...$priorkey PWORD,...$hashkey TAGn", in no particular order with only [,.?] allowed.  
+EOF
+#    "(tested on Ubuntu 22.04 LTS under Gnome version 42.5 (Wayland and X11))"
+exit 0 
+}
+
+#The GNU enhanced getopt from util-linux required (On MAC OS may need to be installed manually over the existing one)
+#uncomment to test your getopts compliance in the unlikely case of parsing issues:
+#getopt --test > /dev/null
+#if [[ $? -ne 4 ]]; then
+#    echo "I'm sorry, 'getopt --test' failed in this environment."
+#    exit 1
+#fi
+
+SHORT=hcbsp:w:d:                # List all the short options
+LONG=help,clip,base,style,priority:,who:,due: # List all the long options
+# getopt advanced mode - see /usr/share/docs/util-linux/ for details 
+# Arguments passed via   -- "$@" for correct parsing
+GOTOPTS=$(getopt --options ${SHORT} --longoptions ${LONG} --name "$0" -- "$@")   
+# Arguments valid?:
+if [[ $? -ne 0 ]]; then
+    exit 2
+fi
+
+eval set -- "${GOTOPTS}" #eval for safe quoting
+
+while [[ ( $# -gt 0 ) ]]
+do
+    case "$1" in
+        -d|--due)       shift
+                        timestamp="$1";;
+        -w|--who)       shift
+                        assignee="$1";;
+        -p|--priority)  shift
+                        plevel="$1";;
+        -h|--help)      show_help;;
+        -c|--clip)      clip=1;;
+        -s|--style)     style=1;;
+        -b|--base)      model="$TEMPD/ggml-base.en.bin";;
+        --);;
+        *) audio_files=("${audio_files[@]}" "$1");;
+    esac
+    shift 
+done
+
+# You must have moved the model files (e.g. ggml-tiny.en.bin, see case parser above) to the tmpfs TEMPD in memory:
+# This can be done once per session using your .zshr (or .bashrc) file by placing something like this in it:
+# ([ -f /dev/shm/ggml-tiny.en.bin ] || cp /path/to/your/local/whisper.cpp/models/ggml* /dev/shm/)
+[[ -r $model ]] || { echo "Model file not found or not readable!" ; exit 1 ; }
+
+for af in ${audio_files[@]}; do
+if [[ -r $af ]]; then 
+   echo -e '------------------  Loading audio from file...'$af'  ------------------\n'
+   # Here we are tasking sox with error handling (remove -q for more verbous output):
+   sox -q $af -t wav $af.wav channels 1 rate 16k norm
+   wavs=("${wavs[@]}" "$TEMPD/$af.wav")  
+else
+   echo -e 'xxxxxxxxxxxxxxxxxx  File '$af' cannot be read!  xxxxxxxxxxxxxxxxxxxx\n'
+   show_help
+fi
+done
+
+if [[ ( ${#wavs[@]} -eq 0 ) ]]; then
+   #FRIENDLY PROMPT:
+   echo -e "\nKEYWORDS:  ...  ${keywrd:u}..... ${hashkey:u}..... ${priorkey:u}.....\n "
+   # sox typically requires user input (CTRL-C) to stop recording from the microphone, this prevents the script from "overreacting":
+   trap "echo -e '--------------------  Done recording  -------------------\n'" SIGINT
+   # recording in wav format at 16k rate, the only currently accepted by whisper.cpp.
+   # Attempts to stop on silence of 3s with threshold of 4%, if in doubt press CTRL-C: 
+   rec -q -t wav $ramf rate 16k channels 1 silence 1 0.1 3% 1 3.6 3%
+   #Remove '-q' above for more verbous output.
+   wavs=("${wavs[@]}" "$ramf")     
+fi
+
+for wf in ${wavs[@]}; do   
+    # To-Do due date trigger datetime:
+    unset adate
+    echo  '--------------------  Now transcribing .....................'
+    # transcribe is a symbolic link (somewhere in your path) to the compiled "main" executable in the whisper.cpp directory.
+    # For example: in your ~/bin> create it with `ln -s /full/path/to/whisper.cpp/main $HOME/bin/transcribe`
+    # The transcribed text is stored in a file (-otxt), in this case /dev/shm/vmfile.txt 
+    transcribe -t $NTHR -pc -nt -m $model -f $wf -otxt 2>/dev/null
+    echo -e '..................... Done transcribing!  --------------------\n'
+
+    # For tracking the time of creation of notes:
+    noted="$(date +%Y-%m-%dT%T)" #ISO-8601-ish.
+    #If your computer can transcribe more than 1 file/sec use: %Y-%m-%dT%T.%2N above
+ 
+    #Get the transcribed text: 
+    cstr="$(< $wf.txt)"
+    #Just the ones that are going to mess up our date parsing:
+    cstr="${cstr//[$'\t\r\n']}"
+    arr=(${=cstr:l})
+    cstr="${cstr%%(${(C)hashkey}|$hashkey|${(C)priorkey}|$priorkey)(,|)*}"
+    #To cover some serious ground, while avoiding (most of) the mines: 
+    [[ $eglob ]] && setopt extendedglob  
+    #For the inline to dos, extract the tags:
+    for i in {1..$#arr} ; do
+        [[ $arr[i] == $hashkey(,|) ]] && tags=("${tags[@]}" '+'"${arr[i+1]//[,.]}") 
+        [[ $arr[i] == $priorkey(,|) ]] && plevel="${arr[i+1]//[,.]}" 
+    done
+    #More than five priority levels not needed.
+    case "$plevel" in
+      top|highest|maximum|alpha|[aA])  plevel="(A)";;
+      high|bravo|[bB])                 plevel="(B)";;
+      normal|charlie|[cC])             plevel="(C)";;
+      low|delta|[dD])                  plevel="(D)";;
+      lowest|minimum|echo|[eE])        plevel="(E)";;
+      *)                            plevel="($plevel)";;
+    esac 
+#For scheduling critically-important stuff with this utility, use the argument "-d" with a valid datetime spec.
+#Datetime specification supplied via -a argument takes precedence:
+if [[ $timestamp ]]; then
+   adate="$(date -d $timestamp +%Y-%m-%dT%H:%M)" || { echo "xxxxxxxxxx  INVALID DATETIME ARGUMENT!! xxxxxxxxxx" ; unset adate; break }
+#Attempt to get due date datetime from transcribed text:
+else  
+ str="${cstr:l}"
+ #If explicit datetime is not passed, the transcribed text will be parsed for a valid due date datetime  
+ #The trigger word for setting due date for the to-do is the last "$keywrd" in the transcribed text.
+ keywrd="${keywrd:l}" # au cas ou
+ #Isolate the time reference and remove possible vagueness 
+ #(oppinionated but adjustable. Only the future considered) 
+ if [[ $str == *"$keywrd"* ]] ; then
+    dt=($(date +%Y%n%_m%n%e%n%u%n%k))
+    #dt[1]=y, dt[2]=m, dt[3]=d, dt[4]=dw, dt[5]=h
+    str="${str##*$keywrd}"
+    str=" $str "
+    #whisper detected non-speech events such as "(wind blowing)" or "[BLANK_AUDIO]": 
+    str="${str/\(*\)}"   
+    str="${str/\[*\]}"    
+    #whisper transcribes these to alph. when time context unclear:
+    str="${str/ nine/ 9}" 
+    str="${str/ eight/ 8}"
+    str="${str/ seven/ 7}"
+    str="${str/ six/ 6}"
+    str="${str/ five/ 5}"
+    str="${str/ four/ 4}"
+    str="${str/ three/ 3}"
+    str="${str/ two/ 2}"
+    str="${str/ one/ 1}"
+    str="${str/ first/ 1}"  # the other ordinals seems to behave in whisper
+    str="${str/ next weekend/ Sun 1pm +7day}"
+    str="${str/ weekend/ Sun 1pm}"
+    str="${str/ couple of/ 2}"
+    str="${str/ dozen/ 12}"
+    str="${str/ day after / 1day }"
+    str="${str/ decade/ 10year}"
+    str="${str/ (several|few)/ 3}"
+    #"dash" seems better than "slash": 2023 dash 6 dash 12 not 2023 slash 6 slash 12:
+    str="${str// slash /'/'}"
+    #Some fixed dates:--------------
+    yr="$dt[1]"
+    #Extract the year if present (for the floaters like easter etc., look in the future)
+    for st in "${=str//[^0-9]##/ }"; do ; yr=$(( st > yr ? st : yr )) ; done
+    [[ "${str/(#m) [0-9]## year[s]#}" ]] && yr=$(( yr + ${${MATCH//[^0-9]}:-0} ))
+    str="${str/(#m) next (christ|hallow|thanks|easter|valent)/ +1year $MATCH[7,$MEND]}"
+    str="${str/ christmas( day|)/ Dec 25th }"
+    str="${str/ halloween/ Oct 31st }"
+    str="${str/ (st. |saint |)valentine('s day|'s|)/ Feb 14th }"
+    # US of A:
+    str="${str/ thanksgiving( day|)/ Nov $((28 - (5 + yr + yr/4 - yr/100 + yr/400) % 7))}"
+    str="${str/ cyber monday/ Nov $((28 - (5 + yr + yr/4 - yr/100 + yr/400) % 7)) +4day}"
+    str="${str/ black friday/ Nov $((28 - (5 + yr + yr/4 - yr/100 + yr/400) % 7)) +1day}"
+    # Canada:
+    str="${str/ boxing day/ Dec 26th }"
+    str="${str/ canada day/ July 1st}"
+    str="${str/ victoria day/ May $((25 - (3 + yr + yr/4 - yr/100 + yr/400) % 7))}"    
+    #western countries only:
+    eas="$(ncal -e $yr)"
+    str="${str/ easter/ $eas}"
+    str="${str/ easter monday/ $eas +1day}"
+    str="${str/ good friday/ $eas -2day}"
+    #greek/russian ortodox easter, uncomment this instead:  
+    #str="${str/ easter(| day)/$(ncal -o $yr)}"
+    str="${str/ new year(s|\'s|\'s day)#/ Jan 1st}"
+    str="${str/ eve / -1day }"
+    #-------------------------------
+    #whisper needs a clear pause to produce 12:34 or 12.34 instead of 1234 but we can fight such unnatural speech:
+    str="${str/(#m)( [0-9][0-5][0-9] | 1[0-9][0-5][0-9] )/$MATCH[1,$MEND-$MBEGIN-2]:$MATCH[$MEND-$MBEGIN-1,$MEND]}"
+    #the logic above being that you can specify this way the time up to 19:59 (1959). Compromise, avoids overlap with yr.
+    #when it does produce 2.34 we convert it to 2:34:
+    str="${str/(#m)[0-9].[0-9]/$MATCH[1]:$MATCH[3]}"
+    str="${str/(#m)([ 123][0-9](rd|nd|st|th)#(,)#| at| to|ast)# ([1-9]|10|11)(:[0-5][0-9])# in the morning/$MATCH[1,$MEND-$MBEGIN-14]am}"
+    str="${str/(#m)([ 123][0-9](rd|nd|st|th)#(,)#| at| to|ast)# [1-7](:[0-5][0-9])# in the afternoon/$MATCH[1,$MEND-$MBEGIN-16]pm}"
+    str="${str/(#m)([ 123][0-9](rd|nd|st|th)#(,)#| at| to|ast)# ([6-9]|10|11)(:[0-5][0-9])# in the evening/$MATCH[1,$MEND-$MBEGIN-14]pm}"
+    str="${str/(#m)([ 123][0-9](rd|nd|st|th)#(,)#| at| to|ast)# ([1-3]|12)(:[0-5][0-9])# at night/$MATCH[1,$MEND-$MBEGIN-8]am}"
+    str="${str/(#m)([ 123][0-9](rd|nd|st|th)#(,)#| at| to|ast)# (10|11)(:[0-5][0-9])# at night/$MATCH[1,$MEND-$MBEGIN-8]pm}"
+    str="${str/(#m)( at| to|ast) ([6-9]|10|11)(:[0-5][0-9])# tonight/$MATCH[1,$MEND-$MBEGIN-7]pm}"
+    str="${str/(#m)tonight(,| at| for)# ([6-9]|10|11)(:[0-5][0-9])#/today $MATCH[9,$MEND]pm}"
+    str="${str/(#m) (1|2|)[0-9] to / -$MATCH[1,$MEND-$MBEGIN-3]min }"
+    str="${str/(#m) (1|2|)[0-9] past / +$MATCH[1,$MEND-$MBEGIN-5]min }"
+    str="${str/ quarter to / -15min }"
+    str="${str/ quarter past / +15min }"
+    str="${str/ half past / +30min }"
+    str="${str/ (early in the morning|early morning)/ 6am}"
+    str="${str/ morning/ 9am}"   #when used alone, i.e. in the morning NOT 6 in the morning 
+    str="${str/ evening/ 8pm}"   #used alone, i.e. in the evening NOT 9 in the evening
+    str="${str/ before noon/ 11am}"  
+    str="${str/ tonight/ 10pm}"
+    str="${str/ afternoon/ 3pm}"  
+    str="${str/ after lunch/ 1pm}"
+    str="${str/ after work/ 6pm}"
+    str="${str/ night / 11pm}"
+    str="${str/ midnight/ 11:59:59pm}"
+    str="${str/ (lunch time|lunch|noon)/ 12pm}"
+    str="${str/ breakfast/ 7am}"  
+    str="${str/ tea time/ 4pm}"      #Not only for tea drinkers, you can set this and others as custom times ...
+    str="${str/ my time/ 5:45am}"    #... for example, if you are an early-rising jogger etc.
+    str="${str/ usual time/ 3:45pm}" #... another SECRET example, preserving privacy when speaking.
+    # These could be precise but will need the parsed date and Lat. and TZ or external tools: 
+    str="${str/ (during|around|just before) sunrise/ 6:10am}"
+    str="${str/ (during|around|just before) sunset/ 6:30pm}"
+    str="${str/ dawn/ 5:30am}"
+    str="${str/ dusk/ 7:30pm}"
+    str="${str/ before dawn/ 4:30am}"
+    #Remove the leftover ballast (stop) words and symbols:
+    str="${str//[[:punct:]]~[-:+]}"
+    for stw in " is " " set " " for " " from " " to " " in " " on " " at " " of " " the " " and " " an " " a " "st " "nd " "rd " "th " " o'clock " ; do 
+        str="${str//$stw/ }"
+    done
+    #fix what we may have broken:-)
+    str="${str/ augu / august }"
+    str="${str/ mon / month }"
+    str="${str/pm[ ]#pm/pm}" #said tonight at 10pm instead of tonight at 10.
+    str="${str/am[ ]#am/am}"
+    [[ $eglob ]] && unsetopt extendedglob
+    adate="$(date -d $str +%s)" || { echo "xxxxxxxxxxxxxx DATE PARSING FAILED!! xxxxxxxxxxxxxxx" ; unset adate; break; }
+    #All our dates are in the future:
+    if [[ $adate ]]; then
+       uct="$(date +%s)"
+       if [[ uct -gt adate ]]; then
+          adate=$(( uct - adate < 86400 ? adate + 86400 : $(date -d "$str +1year" +%s) ))
+       fi 
+    fi
+ fi
+ unset yr eas dt
+fi
+
+# If clipboard flag is set, we send to-do to the clipboard (make sure xsel is installed, e.g. apt install xsel):
+if [[ $clip ]]; then 
+    if [[ $style ]]; then
+      #Confluence style:  
+      echo -en '- [ ] @'"$assignee $tags ${adate:+//$(date -d @$adate +%Y-%m-%dT%H:%M)} $cstr"'\n' | xsel -bi 
+    else
+      #todo.txt style (remove %%T* to display also time):
+      echo -en '- [ ] '"$plevel ${noted%%T*} $cstr $tags @$assignee ${adate:+due:$(date -d @$adate +%Y-%m-%dT%H:%M)}\n" | xsel -bi 
+    fi
+    echo -e "-----------------  Copied task to clipboard!  ------------------\n"
+else
+      #You should find the newly created to-do (with due date set to adate) in $TODOFILE:
+      echo -en "$plevel ${noted%%T*} $cstr $tags @$assignee ${adate:+due:${$(date -d @$adate +%Y-%m-%dT%H:%M)%%T00:00*}}\n" >> "${TODOFILE}" 
+      echo "You can adjust the due date in ${TODOFILE} !!"
+fi
+done

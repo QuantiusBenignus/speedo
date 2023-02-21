@@ -1,0 +1,17 @@
+[Desktop Entry]
+Name=Speedo
+Comment=For use with the speedo CLI utility
+Exec=gnome-terminal --window-with-profile=YOURPROFILENAME --hide-menubar --geometry=64x6+380+920 --title=Speech-to-Todo.txt
+Icon=/home/USERNAME/.local/share/icons/hicolor/128x128/apps/mic128.png
+Terminal=true
+Type=Application
+Categories=Application
+Actions=new-clip;new-todo;
+
+[Desktop Action new-clip]
+Name=To-Do To Clipboard
+Exec=gnome-terminal --window-with-profile=YOURPROFILENAME --hide-menubar --geometry=64x6+380+920 --title=NewClip -- speedo -cw TODO
+
+[Desktop Action new-todo]
+Name=New Joplin ToDo
+Exec=gnome-terminal --window-with-profile=YOURPROFILENAME --hide-menubar --geometry=64x6+380+920 --title=NewTodo -- speedo -w TODO
