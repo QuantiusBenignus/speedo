@@ -16,9 +16,9 @@ or extracted from the transcribed text, using user-configurable keywords. The fo
 ```
 For example, invoking `speedo -w ME`  and speaking:
 
->"I have to see my dentist next week. ==Reminder== for Tuesday. ==hashtag== health." or
+>"I have to see my dentist next week. ***Reminder*** for Tuesday. ***hashtag*** health." or
 
-> "Return customer call ASAP. ==Reminder== tonight at 8. ==Priority== Alpha. ==Hashtag== work. "
+> "Return customer call ASAP. ***Reminder*** tonight at 8. ***Priority*** Alpha. ***Hashtag*** work. "
 
 will result in the following lines in todo.txt (or its equivalent):
 ```
