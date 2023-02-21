@@ -1,7 +1,7 @@
 [Desktop Entry]
 Name=Speedo
 Comment=For use with the speedo CLI utility
-Exec=gnome-terminal --window-with-profile=YOURPROFILENAME --hide-menubar --geometry=64x6+380+920 --title=Speech-to-Todo.txt
+Exec=gnome-terminal --window-with-profile=YOURPROFILENAME --hide-menubar --geometry=64x6+380+920 --title=Speech-to-Todotxt
 Icon=/home/USERNAME/.local/share/icons/hicolor/128x128/apps/mic128.png
 Terminal=true
 Type=Application
